@@ -1,50 +1,45 @@
 import os
+import logging
 import openai
-from flask import Flask, request
-from telegram import Bot, Update
+from telegram import Update
+from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 
-# Load environment variables
+# Load from environment (safe!)
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Validate token before creating bot
+# Fail fast if any key is missing
 if not TELEGRAM_TOKEN:
     raise ValueError("TELEGRAM_TOKEN is missing from environment variables!")
+if not OPENAI_API_KEY:
+    raise ValueError("OPENAI_API_KEY is missing from environment variables!")
 
-bot = Bot(token=TELEGRAM_TOKEN)
+# Set OpenAI key
 openai.api_key = OPENAI_API_KEY
 
-app = Flask(__name__)
+# Logging
+logging.basicConfig(level=logging.INFO)
 
-# Function to call ChatGPT
-def ask_chatgpt(prompt):
+# Bot logic
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_message = update.message.text
+    chat_id = update.effective_chat.id
+
     try:
+        # Call ChatGPT
         response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",  # use "gpt-4" if you have access
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.5,
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": user_message}],
         )
-        return response.choices[0].message.content.strip()
+        reply = response.choices[0].message.content.strip()
     except Exception as e:
-        print(f"OpenAI error: {e}")
-        return "Sorry, I couldn't get an answer."
+        logging.error(f"OpenAI error: {e}")
+        reply = "Sorry, something went wrong while contacting OpenAI."
 
-@app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
-def webhook():
-    update = Update.de_json(request.get_json(force=True), bot)
+    await context.bot.send_message(chat_id=chat_id, text=reply)
 
-    if update.message and update.message.text:
-        user_input = update.message.text
-        chat_id = update.message.chat.id
-        reply = ask_chatgpt(user_input)
-        bot.send_message(chat_id=chat_id, text=reply)
-
-    return "ok"
-
-@app.route("/", methods=["GET"])
-def home():
-    return "Bot is live and running!"
-
+# Entry point
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.run_polling()
