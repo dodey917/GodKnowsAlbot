@@ -2,46 +2,49 @@ import os
 import openai
 from flask import Flask, request
 from telegram import Bot, Update
-from telegram.constants import ParseMode
-from telegram.helpers import escape_markdown
 
+# Load environment variables
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-openai.api_key = OPENAI_API_KEY
+# Validate token before creating bot
+if not TELEGRAM_TOKEN:
+    raise ValueError("TELEGRAM_TOKEN is missing from environment variables!")
+
 bot = Bot(token=TELEGRAM_TOKEN)
+openai.api_key = OPENAI_API_KEY
 
 app = Flask(__name__)
 
-def chatgpt_response(message):
+# Function to call ChatGPT
+def ask_chatgpt(prompt):
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": message}],
-            temperature=0.7,
+            model="gpt-3.5-turbo",  # use "gpt-4" if you have access
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.5,
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        print("OpenAI error:", e)
-        return "Sorry, something went wrong."
+        print(f"OpenAI error: {e}")
+        return "Sorry, I couldn't get an answer."
 
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def webhook():
-    data = request.get_json(force=True)
-    update = Update.de_json(data, bot)
+    update = Update.de_json(request.get_json(force=True), bot)
 
-    if update.message:
+    if update.message and update.message.text:
+        user_input = update.message.text
         chat_id = update.message.chat.id
-        user_text = update.message.text
-
-        reply = chatgpt_response(user_text)
-        bot.send_message(chat_id=chat_id, text=reply, parse_mode=ParseMode.MARKDOWN_V2)
+        reply = ask_chatgpt(user_input)
+        bot.send_message(chat_id=chat_id, text=reply)
 
     return "ok"
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Bot is running."
+    return "Bot is live and running!"
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
